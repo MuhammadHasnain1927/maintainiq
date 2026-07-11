@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign in · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-hero">
+    <div>
+      <div class="brand" style="border:none;padding:0"><div class="brand-mark">M</div><div class="brand-name" style="color:#F2F4F3">Maintain<span>IQ</span></div></div>
+      <div class="eyebrow">MAINTENANCE OPERATIONS PLATFORM</div>
+      <h2>Every asset gets a <em>digital identity</em>. Every fix gets remembered.</h2>
+      <p>QR-tagged assets, structured issue triage, controlled maintenance workflow, and a permanent service history for your whole facility.</p>
+    </div>
+  </div>
+  <div class="auth-form-side">
+    <div class="auth-card">
+      <h1>Sign in</h1>
+      <p class="sub">Access the maintenance operations console.</p>
+      <form id="loginForm">
+        <div class="field"><label for="email">Email</label><input id="email" type="email" required autocomplete="email" placeholder="admin@company.com"></div>
+        <div class="field"><label for="password">Password</label><input id="password" type="password" required autocomplete="current-password" placeholder="••••••••"></div>
+        <div class="forgot-row"><a class="link" href="forgot-password.html">Forgot password?</a></div>
+        <button class="btn btn-primary" style="width:100%" id="loginBtn" type="submit">Sign in</button>
+      </form>
+      <p class="auth-switch">New team member? <a href="signup.html">Create an account</a></p>
+      <p class="auth-switch" style="margin-top:8px">Just scanned a QR code? Public asset pages don't need an account.</p>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+(async()=>{
+  if(qs("deactivated")) toast("Your account has been deactivated by an administrator.",true);
+  if(qs("deleted")) toast("Your account has been permanently deleted.");
+  if(await getSession()) location.href="dashboard.html";
+})();
+document.getElementById("loginForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const btn=document.getElementById("loginBtn");
+  btn.disabled=true; btn.textContent="Signing in…";
+  const {data,error}=await db.auth.signInWithPassword({
+    email:document.getElementById("email").value.trim(),
+    password:document.getElementById("password").value
+  });
+  if(error){ toast(error.message,true); btn.disabled=false; btn.textContent="Sign in"; return; }
+  const {data:p}=await db.from("profiles").select("active").eq("id",data.user.id).single();
+  if(p && p.active===false){
+    await db.auth.signOut();
+    toast("Your account has been deactivated by an administrator.",true);
+    btn.disabled=false; btn.textContent="Sign in";
+    return;
+  }
+  location.href="dashboard.html";
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issues · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn hamburger" id="hamBtn" aria-label="Menu"></button>
+      <h1>Issue Queue</h1>
+      <div class="spacer"></div>
+    </div>
+    <div class="content">
+      <div class="hero"><div class="eyebrow">ISSUE QUEUE</div><h2>From reported to resolved.</h2><p>Triage incoming reports, assign technicians, and move work through a controlled workflow.</p></div>
+      
+      <div class="filter-chip-row" id="quickChips"></div>
+      <div class="toolbar">
+        <input class="grow" id="search" placeholder="Search by number, title, or asset…">
+        <select id="fStatus"><option value="">All statuses</option></select>
+        <select id="fPriority"><option value="">All priorities</option></select>
+        <button class="btn btn-ghost" id="exportBtn">Export CSV</button>
+      </div>
+      <div class="card">
+        <div class="table-wrap"><table>
+          <thead><tr><th>Issue</th><th>Asset</th><th>Priority</th><th>Assigned to</th><th>Status</th><th>Reported</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="6"><div class="skeleton"></div></td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+let all=[], mineOnly=false, profile=null;
+(async()=>{
+  profile=await requireAuth();
+  if(!profile) return;
+  renderShell("issues",profile);
+
+  document.getElementById("fStatus").innerHTML+=ISSUE_STATUSES.map(s=>`<option>${s}</option>`).join("");
+  document.getElementById("fPriority").innerHTML+=PRIORITIES.map(p=>`<option>${p}</option>`).join("");
+  document.getElementById("quickChips").innerHTML=`
+    <button class="fchip on" data-q="all">All open & closed</button>
+    <button class="fchip" data-q="open">Open only</button>
+    <button class="fchip" data-q="critical">Critical</button>
+    <button class="fchip" data-q="mine">Assigned to me</button>`;
+
+  const {data,error}=await db.from("issues").select("*, assets(name,code), profiles:assigned_to(full_name)").order("created_at",{ascending:false});
+  if(error){ toast(error.message,true); return; }
+  all=data||[];
+  render();
+
+  document.getElementById("exportBtn").addEventListener("click",()=>exportCSV(window.__issueList||all,[
+    {label:"Number",get:"number"},{label:"Title",get:"title"},{label:"Asset",get:r=>r.assets?r.assets.code+" "+r.assets.name:""},
+    {label:"Category",get:"category"},{label:"Priority",get:"priority"},{label:"Status",get:"status"},
+    {label:"Assigned to",get:r=>r.profiles?r.profiles.full_name:""},{label:"Reported by",get:"reporter_name"},{label:"Reported at",get:"created_at"}
+  ],"maintainiq-issues.csv"));
+  document.getElementById("search").addEventListener("input",render);
+  document.getElementById("fStatus").addEventListener("change",render);
+  document.getElementById("fPriority").addEventListener("change",render);
+  document.getElementById("quickChips").addEventListener("click",e=>{
+    const b=e.target.closest(".fchip"); if(!b) return;
+    document.querySelectorAll(".fchip").forEach(x=>x.classList.toggle("on",x===b));
+    const q=b.dataset.q;
+    document.getElementById("fStatus").value="";
+    document.getElementById("fPriority").value=q==="critical"?"Critical":"";
+    mineOnly=q==="mine";
+    window.__openOnly=q==="open";
+    render();
+  });
+})();
+
+function render(){
+  const q=document.getElementById("search").value.toLowerCase();
+  const st=document.getElementById("fStatus").value;
+  const pr=document.getElementById("fPriority").value;
+  const list=all.filter(i=>
+    (!q || `${i.number} ${i.title} ${i.assets?.name||""} ${i.assets?.code||""}`.toLowerCase().includes(q)) &&
+    (!st || i.status===st) && (!pr || i.priority===pr) &&
+    (!window.__openOnly || !["Resolved","Closed"].includes(i.status)) &&
+    (!mineOnly || i.assigned_to===profile.id));
+  window.__issueList=list;
+  document.getElementById("rows").innerHTML=list.length?list.map(i=>`
+    <tr onclick="location.href='issue-details.html?id=${i.id}'" style="cursor:pointer">
+      <td><span class="mono" style="font-size:12.5px">${esc(i.number)}</span><span class="sub" style="font-weight:600;color:var(--ink)">${esc(i.title)}</span></td>
+      <td>${i.assets?`<span class="tag">${esc(i.assets.code)}</span><span class="sub">${esc(i.assets.name)}</span>`:"—"}</td>
+      <td><span class="chip ${chipClass(i.priority)}">${esc(i.priority)}</span></td>
+      <td>${esc(i.profiles?.full_name||"Unassigned")}</td>
+      <td><span class="chip ${chipClass(i.status)}">${esc(i.status)}</span></td>
+      <td class="mono" style="font-size:12.5px">${fmtDate(i.created_at)}</td>
+    </tr>`).join(""):`<tr><td colspan="6"><div class="empty"><div class="big">No issues match</div>Try different filters.</div></td></tr>`;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn hamburger" id="hamBtn" aria-label="Menu"></button>
+      <h1>Dashboard</h1>
+      <div class="spacer"></div>
+    </div>
+    <div class="content">
+      <div class="hero"><div class="eyebrow">OPERATIONS OVERVIEW</div><h2>Keep everything running.</h2><p>A live picture of your assets, open issues, and what needs attention next.</p></div>
+      
+      <div class="stat-grid" id="stats">
+        <div class="stat"><div class="k">Total assets</div><div class="v skeleton" style="height:32px;width:60px"></div></div>
+        <div class="stat"><div class="k">Open issues</div><div class="v skeleton" style="height:32px;width:60px"></div></div>
+        <div class="stat"><div class="k">Under maintenance</div><div class="v skeleton" style="height:32px;width:60px"></div></div>
+        <div class="stat"><div class="k">Critical open</div><div class="v skeleton" style="height:32px;width:60px"></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h2>Latest issues</h2><a class="btn btn-ghost btn-sm" href="issues.html">View all</a></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Issue</th><th>Asset</th><th>Priority</th><th>Status</th></tr></thead>
+            <tbody id="recentIssues"><tr><td colspan="4"><div class="skeleton"></div></td></tr></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Assets needing attention</h2><a class="btn btn-ghost btn-sm" href="assets.html">View all</a></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Asset</th><th>Location</th><th>Status</th></tr></thead>
+            <tbody id="attnAssets"><tr><td colspan="3"><div class="skeleton"></div></td></tr></tbody>
+          </table></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px">
+        <div class="card-head"><h2>Service due within 30 days</h2></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Asset</th><th>Location</th><th>Next service</th><th>Status</th></tr></thead>
+          <tbody id="dueAssets"><tr><td colspan="4"><div class="skeleton"></div></td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+(async()=>{
+  const profile=await requireAuth();
+  if(!profile) return;
+  renderShell("dashboard",profile);
+
+  const [{data:assets},{data:issues}]=await Promise.all([
+    db.from("assets").select("*").order("created_at",{ascending:false}),
+    db.from("issues").select("*, assets(name,code)").order("created_at",{ascending:false})
+  ]);
+
+  const openIssues=(issues||[]).filter(i=>!["Resolved","Closed"].includes(i.status));
+  const critOpen=openIssues.filter(i=>i.priority==="Critical");
+  const underMaint=(assets||[]).filter(a=>["Under Maintenance","Under Inspection"].includes(a.status));
+
+  document.getElementById("stats").innerHTML=`
+    <div class="stat" style="--stat-c:var(--accent)"><div class="k">Total assets</div><div class="v">${(assets||[]).length}</div></div>
+    <div class="stat" style="--stat-c:var(--blue)"><div class="k">Open issues</div><div class="v">${openIssues.length}</div></div>
+    <div class="stat" style="--stat-c:var(--purple)"><div class="k">Under inspection / maintenance</div><div class="v">${underMaint.length}</div></div>
+    <div class="stat" style="--stat-c:var(--red)"><div class="k">Critical open</div><div class="v">${critOpen.length}</div></div>`;
+
+  const ri=document.getElementById("recentIssues");
+  const recent=(issues||[]).slice(0,6);
+  ri.innerHTML=recent.length?recent.map(i=>`
+    <tr onclick="location.href='issue-details.html?id=${i.id}'" style="cursor:pointer">
+      <td><span class="mono" style="font-size:12.5px">${esc(i.number)}</span><span class="sub">${esc(i.title)}</span></td>
+      <td>${esc(i.assets?.name||"—")}</td>
+      <td><span class="chip ${chipClass(i.priority)}">${esc(i.priority)}</span></td>
+      <td><span class="chip ${chipClass(i.status)}">${esc(i.status)}</span></td>
+    </tr>`).join(""):`<tr><td colspan="4"><div class="empty"><div class="big">No issues yet</div>Scan an asset QR to report the first one.</div></td></tr>`;
+
+  const attn=(assets||[]).filter(a=>!["Operational","Retired"].includes(a.status)).slice(0,6);
+  document.getElementById("attnAssets").innerHTML=attn.length?attn.map(a=>`
+    <tr onclick="location.href='asset-details.html?id=${a.id}'" style="cursor:pointer">
+      <td><span class="tag">${esc(a.code)}</span><span class="sub">${esc(a.name)}</span></td>
+      <td>${esc(a.location||"—")}</td>
+      <td><span class="chip ${chipClass(a.status)}">${esc(a.status)}</span></td>
+    </tr>`).join(""):`<tr><td colspan="3"><div class="empty"><div class="big">All clear</div>Every asset is operational.</div></td></tr>`;
+
+  const soon=new Date(); soon.setDate(soon.getDate()+30);
+  const due=(assets||[]).filter(a=>a.next_service && new Date(a.next_service)<=soon && a.status!=="Retired")
+    .sort((a,b)=>new Date(a.next_service)-new Date(b.next_service));
+  document.getElementById("dueAssets").innerHTML=due.length?due.map(a=>`
+    <tr onclick="location.href='asset-details.html?id=${a.id}'" style="cursor:pointer">
+      <td><span class="tag">${esc(a.code)}</span><span class="sub">${esc(a.name)}</span></td>
+      <td>${esc(a.location||"—")}</td>
+      <td class="mono">${fmtDate(a.next_service)}</td>
+      <td><span class="chip ${chipClass(a.status)}">${esc(a.status)}</span></td>
+    </tr>`).join(""):`<tr><td colspan="4"><div class="empty"><div class="big">Nothing due soon</div>No scheduled service in the next 30 days.</div></td></tr>`;
+})();
+</script>
+</body>
+</html>

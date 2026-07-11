@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asset details · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn hamburger" id="hamBtn" aria-label="Menu"></button>
+      <h1 id="pageTitle">Asset details</h1>
+      <div class="spacer"></div>
+      <button class="btn btn-ghost" id="editBtn" style="display:none">Edit asset</button>
+    </div>
+    <div class="content" id="content">
+      <div class="skeleton" style="height:220px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-head"><h3>Edit asset</h3><button class="icon-btn" data-close>✕</button></div>
+    <form id="editForm">
+      <div class="modal-body">
+        <div class="field"><label for="eName">Asset name</label><input id="eName" required></div>
+        <div class="form-row">
+          <div class="field"><label for="eCategory">Category</label><select id="eCategory"></select></div>
+          <div class="field"><label for="eCondition">Condition</label><select id="eCondition"></select></div>
+        </div>
+        <div class="field"><label for="eLocation">Location</label><input id="eLocation" required></div>
+        <div class="form-row">
+          <div class="field"><label for="eLast">Last service</label><input id="eLast" type="date"></div>
+          <div class="field"><label for="eNext">Next service</label><input id="eNext" type="date"></div>
+        </div>
+        <div class="field"><label for="eStatus">Status</label><select id="eStatus"></select></div>
+        <div class="field"><label for="eNotes">Internal notes</label><textarea id="eNotes"></textarea></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button class="btn btn-primary">Save changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="print-label" id="printLabel"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+let asset=null, profile=null, isAdmin=false;
+(async()=>{
+  profile=await requireAuth();
+  if(!profile) return;
+  isAdmin=renderShell("assets",profile);
+  const id=qs("id");
+  if(!id){ location.href="assets.html"; return; }
+  await loadAsset(id);
+})();
+
+async function loadAsset(id){
+  const [{data:a},{data:issues},{data:history}]=await Promise.all([
+    db.from("assets").select("*").eq("id",id).maybeSingle(),
+    db.from("issues").select("*").eq("asset_id",id).order("created_at",{ascending:false}),
+    db.from("asset_history").select("*").eq("asset_id",id).order("created_at",{ascending:false}).limit(30)
+  ]);
+  if(!a){
+    document.getElementById("content").innerHTML=`<div class="card card-pad empty"><div class="big">Asset not found</div>This asset may have been removed. <a href="assets.html" style="color:var(--accent-ink);font-weight:600">Back to register</a></div>`;
+    return;
+  }
+  asset=a;
+  document.getElementById("pageTitle").textContent=a.name;
+  if(isAdmin) document.getElementById("editBtn").style.display="";
+  render(a,issues||[],history||[]);
+}
+
+function render(a,issues,history){
+  const url=publicAssetUrl(a.code);
+  document.getElementById("content").innerHTML=`
+    <div class="detail-grid">
+      <div>
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-head">
+            <h2>${esc(a.name)} <span class="tag" style="margin-left:8px">${esc(a.code)}</span></h2>
+            <span class="chip ${chipClass(a.status)}">${esc(a.status)}</span>
+          </div>
+          <div class="kv">
+            <div><div class="k">Category</div><div class="v">${esc(a.category||"—")}</div></div>
+            <div><div class="k">Location</div><div class="v">${esc(a.location||"—")}</div></div>
+            <div><div class="k">Condition</div><div class="v"><span class="chip ${chipClass(a.condition)}">${esc(a.condition||"—")}</span></div></div>
+            <div><div class="k">Registered</div><div class="v mono">${fmtDate(a.created_at)}</div></div>
+            <div><div class="k">Last service</div><div class="v mono">${fmtDate(a.last_service)}</div></div>
+            <div><div class="k">Next service</div><div class="v mono">${fmtDate(a.next_service)}</div></div>
+          </div>
+          ${isAdmin&&a.notes?`<div class="card-pad" style="border-top:1px solid var(--line)"><label>Internal notes</label><div style="font-size:14px">${esc(a.notes)}</div></div>`:""}
+          ${isAdmin?`<div class="card-pad" style="border-top:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap">
+            ${a.status!=="Out of Service"&&a.status!=="Retired"?`<button class="btn btn-danger btn-sm" onclick="setStatus('Out of Service')">Mark out of service</button>`:""}
+            ${a.status==="Out of Service"?`<button class="btn btn-ghost btn-sm" onclick="setStatus('Operational')">Return to operational</button>`:""}
+            ${a.status!=="Retired"?`<button class="btn btn-ghost btn-sm" onclick="setStatus('Retired')">Retire asset</button>`:""}
+          </div>`:""}
+        </div>
+
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-head"><h2>Issues on this asset</h2><a class="btn btn-accent btn-sm" href="${url}" target="_blank" rel="noopener">Report via public page</a></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Issue</th><th>Priority</th><th>Status</th><th>Reported</th></tr></thead>
+            <tbody>${issues.length?issues.map(i=>`
+              <tr onclick="location.href='issue-details.html?id=${i.id}'" style="cursor:pointer">
+                <td><span class="mono" style="font-size:12.5px">${esc(i.number)}</span><span class="sub">${esc(i.title)}</span></td>
+                <td><span class="chip ${chipClass(i.priority)}">${esc(i.priority)}</span></td>
+                <td><span class="chip ${chipClass(i.status)}">${esc(i.status)}</span></td>
+                <td class="mono" style="font-size:12.5px">${fmtDate(i.created_at)}</td>
+              </tr>`).join(""):`<tr><td colspan="4"><div class="empty"><div class="big">No issues reported</div>This asset has a clean record.</div></td></tr>`}
+            </tbody>
+          </table></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Permanent history</h2></div>
+          <div class="card-pad">
+            ${history.length?`<ul class="timeline">${history.map(h=>`
+              <li><div class="t-action">${esc(h.action)}</div><div class="t-meta">${fmtDateTime(h.created_at)} · ${esc(h.actor||"System")}</div></li>`).join("")}</ul>`
+            :`<div class="empty"><div class="big">No activity yet</div>Events appear here automatically.</div>`}
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>QR asset tag</h2></div>
+        <div class="qr-box">
+          <div id="qrcode"></div>
+          <div class="mono" style="font-size:12px;color:var(--ink-2);word-break:break-all;text-align:center">${esc(url)}</div>
+          <div class="qr-actions">
+            <button class="btn btn-ghost btn-sm" onclick="copyLink()">Copy link</button>
+            <a class="btn btn-ghost btn-sm" href="${url}" target="_blank" rel="noopener">Open public page</a>
+            <button class="btn btn-ghost btn-sm" onclick="downloadQR()">Download QR</button>
+            <button class="btn btn-accent btn-sm" onclick="printLabel()">Print label</button>
+          </div>
+          <p style="font-size:12.5px;color:var(--ink-2);text-align:center">Scan with any phone camera. The tag stays linked to this asset even if its name or location changes.</p>
+        </div>
+      </div>
+    </div>`;
+
+  new QRCode(document.getElementById("qrcode"),{text:url,width:190,height:190,correctLevel:QRCode.CorrectLevel.M});
+}
+
+function copyLink(){
+  navigator.clipboard.writeText(publicAssetUrl(asset.code)).then(()=>toast("Public link copied."));
+}
+function downloadQR(){
+  const img=document.querySelector("#qrcode img")||document.querySelector("#qrcode canvas");
+  const src=img.tagName==="IMG"?img.src:img.toDataURL("image/png");
+  const link=document.createElement("a");
+  link.href=src; link.download=`${asset.code}-qr.png`; link.click();
+  toast("QR code downloaded.");
+}
+function printLabel(){
+  const img=document.querySelector("#qrcode img")||document.querySelector("#qrcode canvas");
+  const src=img.tagName==="IMG"?img.src:img.toDataURL("image/png");
+  document.getElementById("printLabel").innerHTML=`
+    <div class="pl-box">
+      <div class="pl-head"><span>${esc(ORG_NAME)}</span><span>MAINTENANCE TAG</span></div>
+      <div class="pl-body">
+        <h2>${esc(asset.name)}</h2>
+        <div class="pl-code">${esc(asset.code)}</div>
+        <img src="${src}" width="200" height="200" alt="QR code">
+        <div class="pl-loc">📍 ${esc(asset.location||"")}</div>
+        <div class="pl-scan">Spotted a problem? Scan this code with your phone camera to report it.</div>
+      </div>
+    </div>`;
+  window.print();
+}
+async function setStatus(status){
+  if(!await confirmDialog("Change asset status",`Set this asset to "${status}"? This will be recorded in the permanent history.`,"Set status",status!=="Operational")) return;
+  const {error}=await db.from("assets").update({status}).eq("id",asset.id);
+  if(error){ toast(error.message,true); return; }
+  await logHistory(asset.id,`Status changed to ${status}`,profile.full_name);
+  toast(`Asset marked ${status}.`);
+  loadAsset(asset.id);
+}
+
+const modal=document.getElementById("editModal");
+document.getElementById("editBtn").onclick=()=>{
+  document.getElementById("eCategory").innerHTML=CATEGORIES.map(c=>`<option ${c===asset.category?"selected":""}>${c}</option>`).join("");
+  document.getElementById("eCondition").innerHTML=CONDITIONS.map(c=>`<option ${c===asset.condition?"selected":""}>${c}</option>`).join("");
+  document.getElementById("eStatus").innerHTML=ASSET_STATUSES.map(s=>`<option ${s===asset.status?"selected":""}>${s}</option>`).join("");
+  document.getElementById("eName").value=asset.name;
+  document.getElementById("eLocation").value=asset.location||"";
+  document.getElementById("eLast").value=asset.last_service||"";
+  document.getElementById("eNext").value=asset.next_service||"";
+  document.getElementById("eNotes").value=asset.notes||"";
+  modal.classList.add("open");
+};
+modal.addEventListener("click",e=>{ if(e.target===modal||e.target.closest("[data-close]")) modal.classList.remove("open"); });
+document.getElementById("editForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const last=document.getElementById("eLast").value||null;
+  const next=document.getElementById("eNext").value||null;
+  if(next && last && new Date(next)<new Date(last)){ toast("Next service can't be before last service.",true); return; }
+  const payload={
+    name:document.getElementById("eName").value.trim(),
+    category:document.getElementById("eCategory").value,
+    condition:document.getElementById("eCondition").value,
+    location:document.getElementById("eLocation").value.trim(),
+    status:document.getElementById("eStatus").value,
+    last_service:last, next_service:next,
+    notes:document.getElementById("eNotes").value.trim()||null
+  };
+  const {error}=await db.from("assets").update(payload).eq("id",asset.id);
+  if(error){ toast(error.message,true); return; }
+  await logHistory(asset.id,"Asset details updated",profile.full_name);
+  toast("Asset updated. The QR tag still points here.");
+  modal.classList.remove("open");
+  loadAsset(asset.id);
+});
+</script>
+</body>
+</html>

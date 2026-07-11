@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Issue details · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn hamburger" id="hamBtn" aria-label="Menu"></button>
+      <h1 id="pageTitle">Issue</h1>
+      <div class="spacer"></div>
+    </div>
+    <div class="content" id="content"><div class="skeleton" style="height:220px"></div></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="maintModal">
+  <div class="modal">
+    <div class="modal-head"><h3>Maintenance record</h3><button class="icon-btn" data-close>✕</button></div>
+    <form id="maintForm">
+      <div class="modal-body">
+        <div class="field"><label for="mFindings">Inspection findings</label><textarea id="mFindings" required placeholder="What was found on inspection?"></textarea></div>
+        <div class="field"><label for="mWork">Work performed</label><textarea id="mWork" required placeholder="What was done to fix it?"></textarea></div>
+        <div class="form-row">
+          <div class="field"><label for="mParts">Parts used</label><input id="mParts" placeholder="HDMI cable 2m, mounting screws"></div>
+          <div class="field"><label for="mCost">Cost</label><input id="mCost" type="number" min="0" step="0.01" placeholder="0.00"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="mCondition">Final asset condition</label><select id="mCondition"></select></div>
+          <div class="field"><label for="mNext">Next service date</label><input id="mNext" type="date"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button class="btn btn-primary" id="maintSaveBtn">Save & resolve issue</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+let issue=null, profile=null, isAdmin=false, technicians=[];
+(async()=>{
+  profile=await requireAuth();
+  if(!profile) return;
+  isAdmin=renderShell("issues",profile);
+  document.getElementById("mCondition").innerHTML=CONDITIONS.map(c=>`<option>${c}</option>`).join("");
+  const id=qs("id");
+  if(!id){ location.href="issues.html"; return; }
+  const {data:techs}=await db.from("profiles").select("id,full_name,role");
+  technicians=(techs||[]).filter(t=>t.role==="technician");
+  await load(id);
+})();
+
+async function load(id){
+  const [{data:i},{data:records}]=await Promise.all([
+    db.from("issues").select("*, assets(id,name,code,location,status), profiles:assigned_to(id,full_name)").eq("id",id).maybeSingle(),
+    db.from("maintenance_records").select("*, profiles:technician_id(full_name)").eq("issue_id",id).order("completed_at",{ascending:false})
+  ]);
+  if(!i){
+    document.getElementById("content").innerHTML=`<div class="card card-pad empty"><div class="big">Issue not found</div><a href="issues.html" style="color:var(--accent-ink);font-weight:600">Back to queue</a></div>`;
+    return;
+  }
+  issue=i;
+  document.getElementById("pageTitle").textContent=i.number;
+  render(i,records||[]);
+}
+
+function canWork(){
+  return isAdmin || issue.assigned_to===profile.id;
+}
+
+function render(i,records){
+  const closed=i.status==="Closed";
+  const nexts=(ISSUE_FLOW[i.status]||[]).filter(s=>{
+    if(s==="Assigned") return isAdmin;
+    if(["Reopened","Closed"].includes(s)) return isAdmin||canWork();
+    return canWork();
+  });
+  document.getElementById("content").innerHTML=`
+    <div class="detail-grid">
+      <div>
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-head">
+            <h2>${esc(i.title)}</h2>
+            <div style="display:flex;gap:8px"><span class="chip ${chipClass(i.priority)}">${esc(i.priority)}</span><span class="chip ${chipClass(i.status)}">${esc(i.status)}</span></div>
+          </div>
+          <div class="card-pad">
+            <p style="margin-bottom:14px">${esc(i.description||"No description provided.")}</p>
+            ${i.ai_suggested?`<p style="font-size:12.5px;color:var(--ink-2)">✨ Details were AI-suggested from the reporter's description and reviewed before submission.</p>`:""}
+          </div>
+          <div class="kv" style="border-top:1px solid var(--line)">
+            <div><div class="k">Issue number</div><div class="v mono">${esc(i.number)}</div></div>
+            <div><div class="k">Category</div><div class="v">${esc(i.category||"—")}</div></div>
+            <div><div class="k">Reported by</div><div class="v">${esc(i.reporter_name||"—")}${i.reporter_contact?` · ${esc(i.reporter_contact)}`:""}</div></div>
+            <div><div class="k">Reported on</div><div class="v mono">${fmtDateTime(i.created_at)}</div></div>
+            <div><div class="k">Assigned to</div><div class="v">${esc(i.profiles?.full_name||"Unassigned")}</div></div>
+            <div><div class="k">Asset</div><div class="v"><a href="asset-details.html?id=${i.assets.id}" style="color:var(--accent-ink);font-weight:600">${esc(i.assets.name)}</a> <span class="mono" style="font-size:12px">${esc(i.assets.code)}</span></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Maintenance records</h2></div>
+          <div class="card-pad">
+            ${records.length?records.map(r=>`
+              <div style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+                  <b>${esc(r.profiles?.full_name||"Technician")}</b>
+                  <span class="mono" style="font-size:12.5px;color:var(--ink-2)">${fmtDateTime(r.completed_at)}</span>
+                </div>
+                <label>Findings</label><p style="margin-bottom:10px;font-size:14px">${esc(r.findings)}</p>
+                <label>Work performed</label><p style="margin-bottom:10px;font-size:14px">${esc(r.work_done)}</p>
+                <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:13.5px">
+                  <span><b>Parts:</b> ${esc(r.parts_used||"None")}</span>
+                  <span><b>Cost:</b> ${r.cost!=null?Number(r.cost).toFixed(2):"—"}</span>
+                </div>
+              </div>`).join("")
+            :`<div class="empty"><div class="big">No maintenance recorded yet</div>Records are added when work is completed.</div>`}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-head"><h2>Workflow</h2></div>
+          <div class="card-pad">
+            ${closed?`<p style="font-size:13.5px;color:var(--ink-2);margin-bottom:12px">This issue is closed and locked. Reopen it to make changes.</p>`:""}
+            ${!canWork()&&!isAdmin?`<p style="font-size:13.5px;color:var(--ink-2);margin-bottom:12px">Only the assigned technician or an administrator can move this issue forward.</p>`:""}
+            ${isAdmin&&["Reported","Reopened","Assigned"].includes(i.status)?`
+              <div class="field"><label for="assignSel">Assign technician</label>
+                <select id="assignSel">
+                  <option value="">Choose a technician…</option>
+                  ${technicians.map(t=>`<option value="${t.id}" ${t.id===i.assigned_to?"selected":""}>${esc(t.full_name)}</option>`).join("")}
+                </select>
+              </div>
+              <button class="btn btn-accent" style="width:100%;margin-bottom:14px" onclick="assign()">Assign & notify queue</button>`:""}
+            <div style="display:flex;flex-direction:column;gap:8px">
+              ${nexts.map(s=>{
+                if(s==="Resolved") return `<button class="btn btn-primary" onclick="openMaint()">Record maintenance & resolve</button>`;
+                if(s==="Assigned"&&isAdmin) return "";
+                const style=s==="Reopened"?"btn-danger":"btn-ghost";
+                return `<button class="btn ${style}" onclick="transition('${s}')">Move to ${s}</button>`;
+              }).join("")||`<p style="font-size:13.5px;color:var(--ink-2)">No actions available for you at this stage.</p>`}
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Status path</h2></div>
+          <div class="card-pad">
+            <ul class="timeline">
+              ${["Reported","Assigned","Inspection Started","Maintenance In Progress","Resolved","Closed"].map(s=>`
+                <li><div class="t-action" style="${s===i.status?"color:var(--accent-ink);":""}${s===i.status?"font-weight:700":""}">${s}${s===i.status?" ← current":""}</div></li>`).join("")}
+            </ul>
+            <p style="font-size:12.5px;color:var(--ink-2)">Waiting for Parts and Reopened branch off this path when needed.</p>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function assign(){
+  const techId=document.getElementById("assignSel").value;
+  if(!techId){ toast("Choose a technician first.",true); return; }
+  const tech=technicians.find(t=>t.id===techId);
+  const {error}=await db.from("issues").update({assigned_to:techId,status:"Assigned",updated_at:new Date().toISOString()}).eq("id",issue.id);
+  if(error){ toast(error.message,true); return; }
+  await logHistory(issue.assets.id,`Issue ${issue.number} assigned to ${tech.full_name}`,profile.full_name,issue.id);
+  toast(`Assigned to ${tech.full_name}.`);
+  load(issue.id);
+}
+
+async function transition(next){
+  if(!(ISSUE_FLOW[issue.status]||[]).includes(next)){ toast(`Can't move from ${issue.status} to ${next}.`,true); return; }
+  if(next==="Reopened" && !await confirmDialog("Reopen issue","The asset will return to Issue Reported status and the team will need to act on it again.","Reopen",true)) return;
+  const {error}=await db.from("issues").update({status:next,updated_at:new Date().toISOString()}).eq("id",issue.id);
+  if(error){ toast(error.message,true); return; }
+  const assetStatus=ISSUE_TO_ASSET_STATUS[next];
+  if(assetStatus && issue.assets.status!=="Retired" && issue.assets.status!=="Out of Service"){
+    await db.from("assets").update({status:assetStatus}).eq("id",issue.assets.id);
+  }
+  await logHistory(issue.assets.id,`Issue ${issue.number} moved to ${next}`,profile.full_name,issue.id);
+  toast(`Issue moved to ${next}.`);
+  load(issue.id);
+}
+
+function openMaint(){ document.getElementById("maintModal").classList.add("open"); }
+const mm=document.getElementById("maintModal");
+mm.addEventListener("click",e=>{ if(e.target===mm||e.target.closest("[data-close]")) mm.classList.remove("open"); });
+
+document.getElementById("maintForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const cost=document.getElementById("mCost").value;
+  if(cost!=="" && Number(cost)<0){ toast("Cost can't be negative.",true); return; }
+  const next=document.getElementById("mNext").value||null;
+  if(next && new Date(next)<new Date()){ toast("Next service date can't be before today's completion date.",true); return; }
+  const btn=document.getElementById("maintSaveBtn");
+  btn.disabled=true; btn.textContent="Saving…";
+  const rec={
+    issue_id:issue.id, asset_id:issue.assets.id, technician_id:profile.id,
+    findings:document.getElementById("mFindings").value.trim(),
+    work_done:document.getElementById("mWork").value.trim(),
+    parts_used:document.getElementById("mParts").value.trim()||null,
+    cost:cost===""?null:Number(cost)
+  };
+  const {error}=await db.from("maintenance_records").insert(rec);
+  if(error){ toast(error.message,true); btn.disabled=false; btn.textContent="Save & resolve issue"; return; }
+  await db.from("issues").update({status:"Resolved",updated_at:new Date().toISOString()}).eq("id",issue.id);
+  const assetUpdate={status:"Operational",condition:document.getElementById("mCondition").value,last_service:new Date().toISOString().slice(0,10)};
+  if(next) assetUpdate.next_service=next;
+  await db.from("assets").update(assetUpdate).eq("id",issue.assets.id);
+  await logHistory(issue.assets.id,`Issue ${issue.number} resolved — ${rec.work_done.slice(0,80)}`,profile.full_name,issue.id);
+  toast("Maintenance recorded. Issue resolved and asset is operational again.");
+  mm.classList.remove("open");
+  btn.disabled=false; btn.textContent="Save & resolve issue";
+  load(issue.id);
+});
+</script>
+</body>
+</html>

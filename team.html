@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn hamburger" id="hamBtn" aria-label="Menu"></button>
+      <h1>Team & Access</h1>
+      <div class="spacer"></div>
+    </div>
+    <div class="content" style="max-width:860px">
+      <div class="hero"><div class="eyebrow">TEAM & ACCESS</div><h2>The people who keep it running.</h2><p>Manage roles and account access. Permissions live here — never on the sign-in page.</p></div>
+      
+      <div class="card card-pad" style="margin-bottom:20px">
+        <h2 style="font-size:16px;margin-bottom:4px">Access control</h2>
+        <p style="font-size:13.5px;color:var(--ink-2)">New team members sign up at the sign-in page and start as Technicians. Promote, demote, or deactivate accounts here — changes take effect on their next page load. Deactivated members are signed out and blocked from every internal page and from all write actions at the database level until reactivated. Administrators can register assets, assign work, and manage the team; Technicians work only on issues assigned to them.</p>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Members</h2><span class="role-pill" id="countPill"></span></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Joined</th><th style="text-align:right">Moderation</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5"><div class="skeleton"></div></td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+let profile=null, members=[];
+(async()=>{
+  profile=await requireAuth();
+  if(!profile) return;
+  const isAdmin=renderShell("team",profile);
+  if(!isAdmin){ location.href="dashboard.html"; return; }
+  await load();
+})();
+
+async function load(){
+  const {data,error}=await db.from("profiles").select("*").order("created_at",{ascending:true});
+  if(error){ toast(error.message,true); return; }
+  members=data||[];
+  document.getElementById("countPill").textContent=`${members.length} member${members.length===1?"":"s"}`;
+  render();
+}
+
+function render(){
+  const admins=members.filter(m=>m.role==="admin"&&m.active!==false).length;
+  document.getElementById("rows").innerHTML=members.map(m=>{
+    const isSelf=m.id===profile.id;
+    const inactive=m.active===false;
+    const lastAdmin=m.role==="admin"&&!inactive&&admins===1;
+    return `<tr style="${inactive?"opacity:.55":""}">
+      <td><b>${esc(m.full_name||"Unnamed")}</b>${isSelf?`<span class="sub">You</span>`:""}</td>
+      <td><span class="chip ${m.role==="admin"?"under-inspection":"retired"}">${esc(m.role)}</span></td>
+      <td><span class="chip ${inactive?"out-of-service":"operational"}">${inactive?"Deactivated":"Active"}</span></td>
+      <td class="mono" style="font-size:12.5px">${fmtDate(m.created_at)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        ${inactive
+          ?`<button class="btn btn-ghost btn-sm" onclick="setActive('${m.id}',true)">Reactivate</button>`
+          :`${m.role==="technician"
+              ?`<button class="btn btn-ghost btn-sm" onclick="setRole('${m.id}','admin')">Make admin</button>`
+              :lastAdmin
+                ?`<span style="font-size:12.5px;color:var(--ink-2)">Last administrator</span>`
+                :`<button class="btn btn-ghost btn-sm" onclick="setRole('${m.id}','technician')">Make technician</button>`}
+            ${!isSelf&&!lastAdmin?`<button class="btn btn-danger btn-sm" onclick="setActive('${m.id}',false)" style="margin-left:6px">Deactivate</button>`:""}`}
+      </td>
+    </tr>`;
+  }).join("")||`<tr><td colspan="5"><div class="empty"><div class="big">No members yet</div>Share the sign-up page with your team.</div></td></tr>`;
+}
+
+async function setActive(id,active){
+  const m=members.find(x=>x.id===id);
+  if(!active && !await confirmDialog("Deactivate member",`${m.full_name||"This member"} will be signed out and blocked from all internal pages and write actions until reactivated.`,"Deactivate",true)) return;
+  const {error}=await db.from("profiles").update({active}).eq("id",id);
+  if(error){ toast(error.message,true); return; }
+  toast(`${m.full_name||"Member"} ${active?"reactivated":"deactivated"}.`);
+  load();
+}
+
+async function setRole(id,role){
+  const m=members.find(x=>x.id===id);
+  if(id===profile.id && role==="technician" && !await confirmDialog("Remove your admin access","You'll lose access to this page immediately and another administrator will need to promote you again.","Remove my access",true)) return;
+  const {error}=await db.from("profiles").update({role}).eq("id",id);
+  if(error){ toast(error.message,true); return; }
+  toast(`${m.full_name||"Member"} is now ${role==="admin"?"an administrator":"a technician"}.`);
+  if(id===profile.id && role==="technician"){ location.href="dashboard.html"; return; }
+  load();
+}
+</script>
+</body>
+</html>

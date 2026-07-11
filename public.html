@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asset · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="public-shell">
+  <div class="public-wrap">
+    <div class="public-brand"><div class="brand-mark">M</div><div class="brand-name">Maintain<span style="color:var(--accent)">IQ</span></div></div>
+    <div id="publicContent"><div class="skeleton" style="height:260px;border-radius:18px"></div></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+let asset=null, aiApplied=false;
+
+const TRIAGE_RULES=[
+  {kw:["leak","water","drip","seep"],category:"Plumbing",title:"Water leakage detected",causes:["Blocked or disconnected drain line","Damaged seal or gasket","Cracked pipe or housing"],checks:["Keep water away from electrical wiring and switch the unit off if they're close","Place a container under the leak and note how fast it fills","Check whether the leak is constant or only during use"]},
+  {kw:["spark","shock","burn","smoke","smell","wire","electric"],category:"Electrical",priority:"Critical",title:"Electrical hazard reported",causes:["Loose or damaged wiring","Overloaded circuit","Failing internal component"],checks:["Do not touch the unit — switch it off at the breaker if safe to do so","Keep people away from the asset until inspected","Wait for a qualified electrician; do not attempt repairs yourself"]},
+  {kw:["flicker","display","screen","hdmi","projector","image","blurry","no signal"],category:"IT & AV",title:"Display or signal fault",causes:["Damaged or loose HDMI/VGA cable","Failing lamp or backlight","Incorrect input source or resolution"],checks:["Reseat the video cable at both ends","Try a different input source","Note whether the fault is constant or intermittent"]},
+  {kw:["cool","cold","hot","ac","air condition","temperature","hvac","heat"],category:"HVAC",title:"Cooling or heating performance issue",causes:["Dirty or clogged air filter","Low refrigerant or frozen coil","Thermostat or sensor fault"],checks:["Check the set temperature and mode on the controller","Look for visible ice or heavy dust on vents","Note which areas are affected and since when"]},
+  {kw:["noise","noisy","sound","grind","rattle","vibrat","bang"],category:"Machinery",title:"Unusual noise or vibration",causes:["Loose mounting or panel","Worn bearing or belt","Foreign object inside the unit"],checks:["Note when the noise occurs (startup, constant, under load)","Stop using the asset if the noise is grinding or metallic","Record a short description of the sound for the technician"]},
+  {kw:["broken","crack","damag","stuck","jam","hinge","door","chair","table"],category:"Furniture",title:"Physical damage reported",causes:["Wear and tear","Impact damage","Failed fixing or hinge"],checks:["Stop using the item if it looks unstable","Move it away from walkways if it's a trip hazard","Photograph the damage if possible"]},
+  {kw:["fire","alarm","extinguisher","emergency"],category:"Safety",priority:"Critical",title:"Safety equipment issue",causes:["Expired or discharged unit","Faulty sensor or panel","Physical damage"],checks:["Report to your facility supervisor immediately","Do not test or tamper with the equipment","Keep escape routes clear"]}
+];
+
+function runTriage(text){
+  const t=text.toLowerCase();
+  const hits=TRIAGE_RULES.filter(r=>r.kw.some(k=>t.includes(k)));
+  if(!hits.length) return {title:"General maintenance issue",category:"Other",priority:"Medium",causes:["Requires on-site inspection to determine cause"],checks:["Note exactly when the problem started","Avoid using the asset if it seems unsafe"]};
+  const main=hits[0];
+  let priority=main.priority||"Medium";
+  if(!main.priority){
+    if(/(urgent|danger|safety|everyone|completely|not working|dead|totally)/.test(t)) priority="High";
+    if(hits.length>1) priority="High";
+  }
+  return {
+    title:main.title,
+    category:main.category,
+    priority,
+    causes:[...new Set(hits.flatMap(h=>h.causes))].slice(0,4),
+    checks:[...new Set(hits.flatMap(h=>h.checks))].slice(0,4)
+  };
+}
+
+(async()=>{
+  const code=qs("code");
+  const box=document.getElementById("publicContent");
+  if(!code){ return notFound("No asset code in this link."); }
+  const {data:a}=await db.from("assets").select("id,code,name,category,location,condition,status,last_service,next_service").eq("code",code).maybeSingle();
+  if(!a){ return notFound(`No asset matches the code "${esc(code)}". Check the tag or contact your facility team.`); }
+  asset=a;
+  const {data:activity}=await db.from("asset_history").select("action,created_at").eq("asset_id",a.id).order("created_at",{ascending:false}).limit(5);
+  const retired=a.status==="Retired";
+  box.innerHTML=`
+    <div class="asset-tag-card">
+      <div class="asset-tag-top">
+        <div class="mono">${esc(a.code)}</div>
+        <h1>${esc(a.name)}</h1>
+        <div style="margin-top:10px"><span class="chip ${chipClass(a.status)}">${esc(a.status)}</span></div>
+        ${retired?`<p style="margin-top:10px;font-size:13.5px;color:#C9D3DB">This asset has been retired and is no longer in service. Its record is kept for reference.</p>`:""}
+      </div>
+      <div class="kv">
+        <div><div class="k">Category</div><div class="v">${esc(a.category||"—")}</div></div>
+        <div><div class="k">Location</div><div class="v">${esc(a.location||"—")}</div></div>
+        <div><div class="k">Condition</div><div class="v">${esc(a.condition||"—")}</div></div>
+        <div><div class="k">Last service</div><div class="v mono">${fmtDate(a.last_service)}</div></div>
+        <div><div class="k">Next service</div><div class="v mono">${fmtDate(a.next_service)}</div></div>
+        <div><div class="k">Reference</div><div class="v mono">${esc(a.code)}</div></div>
+      </div>
+      ${activity&&activity.length?`<div class="card-pad" style="border-top:1px solid var(--line)">
+        <label>Recent activity</label>
+        <ul class="timeline" style="margin-top:8px">${activity.map(h=>`<li><div class="t-action" style="font-size:13.5px">${esc(h.action)}</div><div class="t-meta">${fmtDate(h.created_at)}</div></li>`).join("")}</ul>
+      </div>`:""}
+      ${retired?"":`<div class="card-pad" style="border-top:1px solid var(--line)">
+        <button class="btn btn-accent" style="width:100%" onclick="document.getElementById('reportCard').scrollIntoView({behavior:'smooth'});document.getElementById('desc').focus()">⚠ Report a problem with this asset</button>
+      </div>`}
+    </div>
+
+    ${retired?"":`
+    <div class="card" id="reportCard" style="margin-top:22px">
+      <div class="card-head"><h2>Report an issue</h2></div>
+      <form id="reportForm" class="card-pad">
+        <div class="honeypot" aria-hidden="true"><label for="company">Company</label><input id="company" tabindex="-1" autocomplete="off"></div>
+        <div class="field">
+          <label for="desc">What's wrong? Describe it in your own words</label>
+          <textarea id="desc" required placeholder="e.g. The projector display is flickering and sometimes does not detect HDMI."></textarea>
+        </div>
+        <button type="button" class="btn btn-ghost" id="triageBtn" style="width:100%;margin-bottom:14px">✨ Suggest details from my description</button>
+        <div id="aiPanel"></div>
+        <div class="field"><label for="title">Issue title</label><input id="title" required placeholder="Short summary of the problem"></div>
+        <div class="form-row">
+          <div class="field"><label for="category">Category</label><select id="category">${CATEGORIES.map(c=>`<option>${c}</option>`).join("")}</select></div>
+          <div class="field"><label for="priority">Priority</label><select id="priority">${PRIORITIES.map(p=>`<option ${p==="Medium"?"selected":""}>${p}</option>`).join("")}</select></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="rname">Your name</label><input id="rname" required placeholder="Full name"></div>
+          <div class="field"><label for="rcontact">Contact (optional)</label><input id="rcontact" placeholder="Phone or email"></div>
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="submitBtn">Submit issue report</button>
+        <p style="font-size:12.5px;color:var(--ink-2);margin-top:10px;text-align:center">Suggestions are advisory — review and edit anything before submitting. For electrical, fire, or safety hazards, keep clear and contact a qualified technician.</p>
+      </form>
+      <div class="card-pad" id="doneBox" style="display:none"></div>
+    </div>
+
+    <div class="card" style="margin-top:22px">
+      <div class="card-head"><h2>Check an existing report</h2></div>
+      <div class="card-pad">
+        <div class="field"><label for="checkNum">Issue number</label><input id="checkNum" class="mono" placeholder="ISS-12345678"></div>
+        <button class="btn btn-ghost" style="width:100%" onclick="checkStatus()">Check status</button>
+        <div id="checkResult" style="margin-top:14px"></div>
+      </div>
+    </div>`}
+    <p style="text-align:center;font-size:12.5px;color:var(--ink-2);margin-top:24px">${esc(ORG_NAME)} · Powered by MaintainIQ</p>`;
+
+  if(!retired) wireForm();
+})();
+
+function notFound(msg){
+  document.getElementById("publicContent").innerHTML=`
+    <div class="asset-tag-card"><div class="asset-tag-top"><h1>Asset not found</h1></div>
+    <div class="card-pad"><p style="color:var(--ink-2)">${msg}</p></div></div>`;
+}
+
+function wireForm(){
+  document.getElementById("triageBtn").addEventListener("click",()=>{
+    const desc=document.getElementById("desc").value.trim();
+    if(desc.length<10){ toast("Describe the problem in a bit more detail first.",true); return; }
+    const btn=document.getElementById("triageBtn");
+    btn.disabled=true; btn.textContent="Analysing…";
+    setTimeout(()=>{
+      try{
+        const t=runTriage(desc);
+        document.getElementById("title").value=t.title;
+        document.getElementById("category").value=t.category;
+        document.getElementById("priority").value=t.priority;
+        aiApplied=true;
+        document.getElementById("aiPanel").innerHTML=`
+          <div class="ai-panel">
+            <h4>✨ Smart triage suggestion</h4>
+            <div style="font-size:13.5px;margin-bottom:8px"><b>Possible causes</b></div>
+            <ul>${t.causes.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>
+            <div style="font-size:13.5px;margin:10px 0 8px"><b>Safe first checks</b></div>
+            <ul>${t.checks.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>
+            <div class="note">These suggestions were generated from your description. Edit the title, category, or priority above if they don't fit. Critical or safety-related problems should always be handled by a qualified technician.</div>
+          </div>`;
+      }catch(e){
+        document.getElementById("aiPanel").innerHTML=`<div class="ai-panel"><h4>Suggestion unavailable</h4><p style="font-size:13.5px">Fill in the details manually — your report will still go through.</p></div>`;
+      }
+      btn.disabled=false; btn.textContent="✨ Suggest details from my description";
+    },650);
+  });
+
+  document.getElementById("reportForm").addEventListener("submit",async e=>{
+    e.preventDefault();
+    if(document.getElementById("company").value){ toast("Submission blocked.",true); return; }
+    const desc=document.getElementById("desc").value.trim();
+    if(desc.length<15){ toast("Please describe the problem in a little more detail so the team can act on it.",true); return; }
+    const last=Number(localStorage.getItem("miq_last_report")||0);
+    if(Date.now()-last<60000){
+      toast(`Please wait ${Math.ceil((60000-(Date.now()-last))/1000)}s before submitting another report from this device.`,true);
+      return;
+    }
+    const btn=document.getElementById("submitBtn");
+    btn.disabled=true; btn.textContent="Submitting…";
+    const number=issueNumber();
+    const payload={
+      number, asset_id:asset.id,
+      title:document.getElementById("title").value.trim(),
+      description:document.getElementById("desc").value.trim(),
+      category:document.getElementById("category").value,
+      priority:document.getElementById("priority").value,
+      status:"Reported",
+      reporter_name:document.getElementById("rname").value.trim(),
+      reporter_contact:document.getElementById("rcontact").value.trim()||null,
+      ai_suggested:aiApplied
+    };
+    const {error}=await db.from("issues").insert(payload);
+    if(error){ toast(error.message,true); btn.disabled=false; btn.textContent="Submit issue report"; return; }
+    localStorage.setItem("miq_last_report",String(Date.now()));
+    document.getElementById("reportForm").style.display="none";
+    document.getElementById("doneBox").style.display="";
+    document.getElementById("doneBox").innerHTML=`
+      <div class="empty" style="padding:20px">
+        <div class="big">Report submitted ✓</div>
+        <p>Your issue number is</p>
+        <p class="mono" style="font-size:20px;font-weight:700;margin:8px 0;color:var(--accent-ink)">${number}</p>
+        <p>Save it to check progress on this page any time. The maintenance team has been notified.</p>
+      </div>`;
+    document.getElementById("doneBox").scrollIntoView({behavior:"smooth"});
+  });
+}
+
+async function checkStatus(){
+  const num=document.getElementById("checkNum").value.trim().toUpperCase();
+  const out=document.getElementById("checkResult");
+  if(!num){ out.innerHTML=""; return; }
+  const {data:i}=await db.from("issues").select("number,title,status,priority,created_at").eq("number",num).maybeSingle();
+  out.innerHTML=i?`
+    <div class="kv" style="border:1px solid var(--line);border-radius:12px;overflow:hidden">
+      <div><div class="k">Issue</div><div class="v mono">${esc(i.number)}</div></div>
+      <div><div class="k">Status</div><div class="v"><span class="chip ${chipClass(i.status)}">${esc(i.status)}</span></div></div>
+      <div><div class="k">Title</div><div class="v">${esc(i.title)}</div></div>
+      <div><div class="k">Reported</div><div class="v mono">${fmtDate(i.created_at)}</div></div>
+    </div>`
+    :`<div class="empty" style="padding:14px"><div class="big">Not found</div>No report matches that number.</div>`;
+}
+</script>
+</body>
+</html>

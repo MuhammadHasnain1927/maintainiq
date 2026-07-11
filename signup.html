@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Create account · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-hero">
+    <div>
+      <div class="brand" style="border:none;padding:0"><div class="brand-mark">M</div><div class="brand-name" style="color:#F2F4F3">Maintain<span>IQ</span></div></div>
+      <div class="eyebrow">MAINTENANCE OPERATIONS PLATFORM</div>
+      <h2>Join the team that keeps <em>everything running</em>.</h2>
+      <p>Administrators register assets and assign work. Technicians inspect, repair, and record every job into the asset's permanent history.</p>
+    </div>
+  </div>
+  <div class="auth-form-side">
+    <div class="auth-card">
+      <h1>Create account</h1>
+      <p class="sub">Set up your operations profile.</p>
+      <form id="signupForm">
+        <div class="field"><label for="name">Full name</label><input id="name" required placeholder="Ayesha Khan"></div>
+        <div class="field"><label for="email">Email</label><input id="email" type="email" required autocomplete="email" placeholder="you@company.com"></div>
+        <div class="field"><label for="password">Password</label><input id="password" type="password" required minlength="6" autocomplete="new-password" placeholder="Minimum 6 characters"></div>
+        <button class="btn btn-primary" style="width:100%" id="signupBtn" type="submit">Create account</button>
+      </form>
+      <p class="auth-switch" style="margin-top:14px;font-size:13px">Access levels are managed by your administrator. New accounts start as Technician; the first account in a new workspace becomes the Administrator automatically.</p>
+      <p class="auth-switch">Already registered? <a href="index.html">Sign in</a></p>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+document.getElementById("signupForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const btn=document.getElementById("signupBtn");
+  btn.disabled=true; btn.textContent="Creating…";
+  const full_name=document.getElementById("name").value.trim();
+  const {data,error}=await db.auth.signUp({
+    email:document.getElementById("email").value.trim(),
+    password:document.getElementById("password").value,
+    options:{data:{full_name}}
+  });
+  if(error){ toast(error.message,true); btn.disabled=false; btn.textContent="Create account"; return; }
+  if(data.session){
+    location.href="dashboard.html";
+  }else{
+    toast("Account created. Check your email to confirm, then sign in.");
+    setTimeout(()=>location.href="index.html",2600);
+  }
+});
+</script>
+</body>
+</html>

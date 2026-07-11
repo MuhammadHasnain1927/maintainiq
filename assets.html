@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Assets · MaintainIQ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27><rect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%23F5A623%27/><text x=%2732%27 y=%2744%27 font-family=%27Arial Black,Arial%27 font-size=%2736%27 font-weight=%27900%27 text-anchor=%27middle%27 fill=%27%231A1300%27>M</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="icon-btn hamburger" id="hamBtn" aria-label="Menu"></button>
+      <h1>Asset Register</h1>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" id="newAssetBtn" style="display:none">＋ Register asset</button>
+    </div>
+    <div class="content">
+      <div class="hero"><div class="eyebrow">ASSET REGISTER</div><h2>Every asset, one digital identity.</h2><p>Register equipment, generate QR tags, and track condition and service schedules in one place.</p></div>
+      
+      <div class="toolbar">
+        <input class="grow" id="search" placeholder="Search by name, code, or location…">
+        <select id="fCategory"><option value="">All categories</option></select>
+        <select id="fStatus"><option value="">All statuses</option></select>
+        <button class="btn btn-ghost" id="exportBtn">Export CSV</button>
+      </div>
+      <div class="filter-chip-row" id="quickChips"></div>
+      <div class="card">
+        <div class="table-wrap"><table>
+          <thead><tr><th>Asset tag</th><th>Category</th><th>Location</th><th>Condition</th><th>Next service</th><th>Status</th></tr></thead>
+          <tbody id="rows"><tr><td colspan="6"><div class="skeleton"></div></td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="assetModal">
+  <div class="modal">
+    <div class="modal-head"><h3>Register asset</h3><button class="icon-btn" data-close>✕</button></div>
+    <form id="assetForm">
+      <div class="modal-body">
+        <div class="field"><label for="aName">Asset name</label><input id="aName" required placeholder="Classroom Projector 01"></div>
+        <div class="form-row">
+          <div class="field"><label for="aCode">Asset code</label><input id="aCode" required class="mono"></div>
+          <div class="field"><label for="aCategory">Category</label><select id="aCategory"></select></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="aLocation">Location</label><input id="aLocation" required placeholder="Block B · Room 204"></div>
+          <div class="field"><label for="aCondition">Condition</label><select id="aCondition"></select></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label for="aLast">Last service</label><input id="aLast" type="date"></div>
+          <div class="field"><label for="aNext">Next service</label><input id="aNext" type="date"></div>
+        </div>
+        <div class="field"><label for="aNotes">Internal notes (never shown publicly)</label><textarea id="aNotes" placeholder="Serial number, warranty, supplier…"></textarea></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button class="btn btn-primary" id="saveAssetBtn">Register asset</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+<script>
+let allAssets=[], activeQuick="";
+(async()=>{
+  const profile=await requireAuth();
+  if(!profile) return;
+  const isAdmin=renderShell("assets",profile);
+  if(isAdmin) document.getElementById("newAssetBtn").style.display="";
+
+  document.getElementById("fCategory").innerHTML+=CATEGORIES.map(c=>`<option>${c}</option>`).join("");
+  document.getElementById("fStatus").innerHTML+=ASSET_STATUSES.map(s=>`<option>${s}</option>`).join("");
+  document.getElementById("aCategory").innerHTML=CATEGORIES.map(c=>`<option>${c}</option>`).join("");
+  document.getElementById("aCondition").innerHTML=CONDITIONS.map(c=>`<option>${c}</option>`).join("");
+  document.getElementById("quickChips").innerHTML=["","Operational","Issue Reported","Under Maintenance","Out of Service"]
+    .map(s=>`<button class="fchip ${s===activeQuick?"on":""}" data-q="${s}">${s||"All"}</button>`).join("");
+
+  await load();
+
+  document.getElementById("exportBtn").addEventListener("click",()=>exportCSV(window.__assetList||allAssets,[
+    {label:"Code",get:"code"},{label:"Name",get:"name"},{label:"Category",get:"category"},
+    {label:"Location",get:"location"},{label:"Condition",get:"condition"},{label:"Status",get:"status"},
+    {label:"Last service",get:"last_service"},{label:"Next service",get:"next_service"}
+  ],"maintainiq-assets.csv"));
+  document.getElementById("search").addEventListener("input",render);
+  document.getElementById("fCategory").addEventListener("change",render);
+  document.getElementById("fStatus").addEventListener("change",render);
+  document.getElementById("quickChips").addEventListener("click",e=>{
+    const b=e.target.closest(".fchip"); if(!b) return;
+    activeQuick=b.dataset.q;
+    document.querySelectorAll(".fchip").forEach(x=>x.classList.toggle("on",x===b));
+    document.getElementById("fStatus").value=activeQuick;
+    render();
+  });
+
+  const modal=document.getElementById("assetModal");
+  document.getElementById("newAssetBtn").onclick=()=>{
+    document.getElementById("assetForm").reset();
+    document.getElementById("aCode").value=assetCode();
+    modal.classList.add("open");
+  };
+  modal.addEventListener("click",e=>{ if(e.target===modal||e.target.closest("[data-close]")) modal.classList.remove("open"); });
+
+  document.getElementById("assetForm").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const btn=document.getElementById("saveAssetBtn");
+    const code=document.getElementById("aCode").value.trim().toUpperCase();
+    const last=document.getElementById("aLast").value||null;
+    const next=document.getElementById("aNext").value||null;
+    if(next && last && new Date(next)<new Date(last)){ toast("Next service can't be before last service.",true); return; }
+    if(allAssets.some(a=>a.code===code)){ toast(`Asset code ${code} already exists.`,true); return; }
+    btn.disabled=true; btn.textContent="Saving…";
+    const payload={
+      code, name:document.getElementById("aName").value.trim(),
+      category:document.getElementById("aCategory").value,
+      location:document.getElementById("aLocation").value.trim(),
+      condition:document.getElementById("aCondition").value,
+      status:"Operational", last_service:last, next_service:next,
+      notes:document.getElementById("aNotes").value.trim()||null
+    };
+    const {data,error}=await db.from("assets").insert(payload).select().single();
+    btn.disabled=false; btn.textContent="Register asset";
+    if(error){ toast(error.code==="23505"?`Asset code ${code} already exists.`:error.message,true); return; }
+    await logHistory(data.id,"Asset registered",profile.full_name);
+    toast("Asset registered. QR code is ready on its details page.");
+    modal.classList.remove("open");
+    location.href=`asset-details.html?id=${data.id}`;
+  });
+})();
+
+async function load(){
+  const {data,error}=await db.from("assets").select("*").order("created_at",{ascending:false});
+  if(error){ toast(error.message,true); return; }
+  allAssets=data||[];
+  render();
+}
+
+function render(){
+  const q=document.getElementById("search").value.toLowerCase();
+  const cat=document.getElementById("fCategory").value;
+  const st=document.getElementById("fStatus").value;
+  const list=allAssets.filter(a=>
+    (!q || `${a.name} ${a.code} ${a.location}`.toLowerCase().includes(q)) &&
+    (!cat || a.category===cat) && (!st || a.status===st));
+  window.__assetList=list;
+  document.getElementById("rows").innerHTML=list.length?list.map(a=>`
+    <tr onclick="location.href='asset-details.html?id=${a.id}'" style="cursor:pointer">
+      <td><span class="tag">${esc(a.code)}</span><span class="sub" style="font-weight:600;color:var(--ink)">${esc(a.name)}</span></td>
+      <td>${esc(a.category||"—")}</td>
+      <td>${esc(a.location||"—")}</td>
+      <td><span class="chip ${chipClass(a.condition)}">${esc(a.condition||"—")}</span></td>
+      <td class="mono">${fmtDate(a.next_service)}</td>
+      <td><span class="chip ${chipClass(a.status)}">${esc(a.status)}</span></td>
+    </tr>`).join(""):`<tr><td colspan="6"><div class="empty"><div class="big">No assets found</div>Adjust the filters or register a new asset.</div></td></tr>`;
+}
+</script>
+</body>
+</html>
